@@ -1,0 +1,89 @@
+{
+  "name": "@natsuneko-laboratory/react-native-emoji-verse",
+  "version": "0.1.0",
+  "description": "Emoji picker for React Native with per-Unicode-version emoji data and skin tone support.",
+  "license": "MIT",
+  "author": "Kanon Mochizuki <me@natsuneko.cat> (https://github.com/mika-f)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mika-f/react-native-emoji-verse.git"
+  },
+  "homepage": "https://github.com/mika-f/react-native-emoji-verse#readme",
+  "bugs": "https://github.com/mika-f/react-native-emoji-verse/issues",
+  "packageManager": "pnpm@12.4.2",
+  "keywords": [
+    "react-native",
+    "emoji",
+    "emoji-picker",
+    "unicode",
+    "skin-tone"
+  ],
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "react-native": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "react-native": "./src/index.ts",
+      "default": "./lib/index.js"
+    },
+    "./sheet": {
+      "types": "./lib/sheet.d.ts",
+      "react-native": "./src/sheet.ts",
+      "default": "./lib/sheet.js"
+    },
+    "./loader": {
+      "types": "./lib/loader.d.ts",
+      "react-native": "./src/loader.ts",
+      "default": "./lib/loader.js"
+    },
+    "./data/*": {
+      "types": "./lib/data/*.d.ts",
+      "react-native": "./src/data/*.ts",
+      "default": "./lib/data/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "src",
+    "lib",
+    "!src/unicode",
+    "LICENSE-UNICODE"
+  ],
+  "scripts": {
+    "generate": "node scripts/generate-data.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepack": "pnpm build"
+  },
+  "peerDependencies": {
+    "@gorhom/bottom-sheet": ">=5",
+    "lucide-react-native": ">=1",
+    "react": ">=18",
+    "react-native": ">=0.73"
+  },
+  "peerDependenciesMeta": {
+    "@gorhom/bottom-sheet": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@gorhom/bottom-sheet": "^5.2.14",
+    "@types/node": "^24.13.6",
+    "@types/react": "^19.3.0",
+    "lucide-react-native": "^1.47.0",
+    "react": "19.2.8",
+    "react-native": "0.86.2",
+    "react-native-gesture-handler": "^3.3.0",
+    "react-native-reanimated": "^4.7.0",
+    "react-native-svg": "^15.15.5",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.1"
+  }
+}
