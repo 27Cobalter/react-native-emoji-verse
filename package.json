@@ -6,10 +6,10 @@
   "author": "Kanon Mochizuki <me@natsuneko.cat> (https://github.com/mika-f)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mika-f/react-native-emoji-verse.git"
+    "url": "git+https://github.com/teyvat-project/react-native-emoji-verse.git"
   },
-  "homepage": "https://github.com/mika-f/react-native-emoji-verse#readme",
-  "bugs": "https://github.com/mika-f/react-native-emoji-verse/issues",
+  "homepage": "https://github.com/teyvat-project/react-native-emoji-verse#readme",
+  "bugs": "https://github.com/teyvat-project/react-native-emoji-verse/issues",
   "packageManager": "pnpm@12.4.2",
   "keywords": [
     "react-native",
@@ -57,6 +57,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test",
     "prepack": "pnpm build"
   },
   "peerDependencies": {
