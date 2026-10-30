@@ -20,7 +20,7 @@ import {
   type FlatListProps,
   Image,
   type ImageStyle,
-  Platform,
+  type LayoutChangeEvent,
   Pressable,
   ScrollView,
   type StyleProp,
@@ -33,7 +33,10 @@ import {
 import { applySkinTone, SKIN_TONE_MODIFIERS, SKIN_TONES, toVariantItem } from "./skin-tone";
 import type { EmojiCategory, EmojiIcon, EmojiItem, SkinTone } from "./types";
 
-const GRID_COLUMNS = Platform.OS === "ios" && Platform.isPad ? 12 : 8;
+// 列数はグリッドの幅から決める。iPad かどうかで決めると、iPhone Duo を開いた状態のような広い画面ですき間が空く
+const MIN_GRID_COLUMNS = 8;
+const TARGET_CELL_SIZE = 56;
+const GRID_PADDING = 8;
 const EMOJI_SIZE = 36;
 const SKIN_TONE_ICON_SIZE = 20;
 
@@ -109,6 +112,7 @@ const EmojiItemCell = memo(
     onLongPress,
     renderGlyph,
     ImageComponent,
+    columns,
   }: {
     item: EmojiItem;
     skinTone: SkinTone;
@@ -116,6 +120,7 @@ const EmojiItemCell = memo(
     onLongPress: (item: EmojiItem) => void;
     renderGlyph: GlyphRenderer;
     ImageComponent: React.ComponentType<EmojiImageProps>;
+    columns: number;
   }) => {
     // 長押しでは肌の色を適用する前の絵文字からバリエーションを選ばせる
     const toned = useMemo(() => applySkinTone(item, skinTone), [item, skinTone]);
@@ -126,7 +131,7 @@ const EmojiItemCell = memo(
       <Pressable
         onPress={handlePress}
         onLongPress={item.variants ? handleLongPress : undefined}
-        style={styles.emojiCell}
+        style={[styles.emojiCell, { width: `${100 / columns}%` }]}
       >
         {toned.type.kind === "unicode" ? (
           renderGlyph(toned.type.emoji, EMOJI_SIZE)
@@ -183,6 +188,10 @@ export function EmojiPickerView({
   const [innerSkinTone, setInnerSkinTone] = useState<SkinTone>(defaultSkinTone);
   const [isSkinTonePickerOpen, setIsSkinTonePickerOpen] = useState(false);
   const [variantTarget, setVariantTarget] = useState<EmojiItem | null>(null);
+  const [gridWidth, setGridWidth] = useState(0);
+  const gridColumns = Math.max(MIN_GRID_COLUMNS, Math.floor((gridWidth - GRID_PADDING * 2) / TARGET_CELL_SIZE));
+  // セルは正方形 (aspectRatio: 1) なので、行の高さはセルの幅と同じ
+  const rowHeight = gridWidth > 0 ? (gridWidth - GRID_PADDING * 2) / gridColumns : EMOJI_SIZE + 8;
   const skinTone = controlledSkinTone ?? innerSkinTone;
   const hasVariants = useMemo(() => categories.some((c) => c.emojis.some((e) => e.variants)), [categories]);
   const showSkinToneSelector = showSkinToneSelectorProp ?? hasVariants;
@@ -253,9 +262,10 @@ export function EmojiPickerView({
         onLongPress={setVariantTarget}
         renderGlyph={renderGlyph}
         ImageComponent={ImageComponent}
+        columns={gridColumns}
       />
     ),
-    [skinTone, handleEmojiPress, renderGlyph, ImageComponent],
+    [skinTone, handleEmojiPress, renderGlyph, ImageComponent, gridColumns],
   );
 
   const keyExtractor = useCallback((item: EmojiItem, index: number) => `${item.id}-${index}`, []);
@@ -350,16 +360,20 @@ export function EmojiPickerView({
         </View>
       ) : (
         <FlatListComponent
+          // FlatList は numColumns を実行中に変えられないので、列数が変わったら作り直す
+          key={gridColumns}
           style={styles.list}
+          onLayout={(e: LayoutChangeEvent) => setGridWidth(e.nativeEvent.layout.width)}
           data={displayEmojis}
           renderItem={renderItem}
           keyExtractor={keyExtractor}
-          numColumns={GRID_COLUMNS}
+          numColumns={gridColumns}
           contentContainerStyle={styles.gridContent}
           columnWrapperStyle={styles.gridRow}
+          // numColumns > 1 のとき、index は絵文字ではなく行の番号になる
           getItemLayout={(_: unknown, index: number) => ({
-            length: EMOJI_SIZE + 8,
-            offset: (EMOJI_SIZE + 8) * Math.floor(index / GRID_COLUMNS),
+            length: rowHeight,
+            offset: GRID_PADDING + rowHeight * index,
             index,
           })}
           initialNumToRender={40}
@@ -450,7 +464,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   gridContent: {
-    padding: 8,
+    padding: GRID_PADDING,
   },
   loadingContainer: {
     flex: 1,
@@ -461,7 +475,6 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
   },
   emojiCell: {
-    width: `${100 / GRID_COLUMNS}%`,
     aspectRatio: 1,
     alignItems: "center",
     justifyContent: "center",
