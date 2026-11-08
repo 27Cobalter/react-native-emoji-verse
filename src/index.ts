@@ -21,6 +21,8 @@ export type {
   EmojiIcon,
   EmojiItem,
   EmojiItemType,
+  EmojiSearchProvider,
+  EmojiSearchResult,
   RawEmoji,
   SkinTone,
 } from "./types";
