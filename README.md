@@ -97,7 +97,38 @@ const custom: EmojiCategory = {
 
 Set `emptyMessage` on a category to show text in place of the grid when the category has no emoji, such as an empty recently used list. When the picker opens, it selects the first category that has emoji.
 
-The built-in icon names are `clock`, `smile`, `paw-print`, `utensils`, `trophy`, `plane`, `lightbulb`, `heart`, `flag`, `star` and `star-plus`.
+The built-in icon names are `clock`, `smile`, `paw-print`, `utensils`, `trophy`, `plane`, `lightbulb`, `heart`, `flag`, `star`, `star-plus` and `sparkles`.
+
+## Search provider
+
+To search outside the picker, for example by meaning on your server, pass a `searchProvider`. It adds a tab before the categories. While the tab is selected, the search bar text goes to `search` after the user stops typing. To search only when the user presses the search key on the keyboard or closes the keyboard, set `searchOn: "submit"`. This avoids searching with text that an input method has not converted yet, such as Japanese kana. Add `submitLabel` to show a button that searches the typed text, in place of the results, until the user submits it.
+
+```tsx
+const provider = useMemo<EmojiSearchProvider>(
+  () => ({
+    icon: "sparkles",
+    placeholder: "Describe a feeling or scene",
+    idleMessage: "Type a phrase to find emoji with a similar meaning.",
+    emptyMessage: "No emoji found.",
+    errorMessage: "Search failed. Try again later.",
+    tryLabel: "Search by meaning", // shown when the regular search finds nothing
+    search: async (query, { signal }) => {
+      const res = await fetch(`https://example.com/search?q=${encodeURIComponent(query)}`, { signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return { items: toEmojiItems(await res.json()) };
+    },
+  }),
+  [],
+);
+
+<EmojiPickerView categories={categories} onEmojiSelected={onSelect} searchProvider={provider} />;
+```
+
+`search` returns `{ items, message? }`. When `items` is empty, the picker shows `message` (or `emptyMessage`) in place of the grid. Otherwise, it shows `message` as a note above the grid. If `search` rejects, the picker shows `errorMessage`. Changing the text aborts the previous `signal`, and the picker ignores results that arrive after that. Memoize the provider, because a new object starts the search again.
+
+To show earlier results without waiting, add `peek`. It returns a stored result for a query, or `undefined`. When it returns a result, the picker shows it at once and does not call `search`.
+
+To open the picker on the same search again, keep the text from `onProviderQueryChange` and pass it back as `defaultProviderQuery`. The picker then opens on the provider tab with that text. `onProviderQueryChange` reports the text without surrounding spaces, and reports an empty string when the user moves to another tab.
 
 ## EmojiPickerView props
 
@@ -113,6 +144,8 @@ The built-in icon names are `clock`, `smile`, `paw-print`, `utensils`, `trophy`,
 | `searchPlaceholder` | `"Search emoji"` | |
 | `skinTone` / `defaultSkinTone` / `onSkinToneChange` | `0` | The skin tone, as a controlled or uncontrolled value. `0` means no tone (yellow) and `1`–`5` map to Fitzpatrick types 1-2 to 6. |
 | `showSkinToneSelector` | auto | Shows the skin tone button in the search bar. By default, the button appears only when some emoji in `categories` has skin tone variants. |
+| `searchProvider` | | Adds a tab that searches with your own function. See [Search provider](#search-provider). |
+| `defaultProviderQuery` / `onProviderQueryChange` | | Opens the picker on the provider tab with this text, and reports the text searched on that tab. See [Search provider](#search-provider). |
 
 The picker does not store the skin tone. To keep it between launches, persist the value from `onSkinToneChange`.
 

@@ -7,6 +7,7 @@ import {
   Plane,
   Search,
   Smile,
+  Sparkles,
   Star,
   StarPlus,
   Trophy,
@@ -20,6 +21,7 @@ import {
   type FlatListProps,
   Image,
   type ImageStyle,
+  Keyboard,
   type LayoutChangeEvent,
   Pressable,
   ScrollView,
@@ -31,7 +33,14 @@ import {
   useColorScheme,
 } from "react-native";
 import { applySkinTone, SKIN_TONE_MODIFIERS, SKIN_TONES, toVariantItem } from "./skin-tone";
-import type { EmojiCategory, EmojiIcon, EmojiItem, SkinTone } from "./types";
+import type {
+  EmojiCategory,
+  EmojiIcon,
+  EmojiItem,
+  EmojiSearchProvider,
+  EmojiSearchResult,
+  SkinTone,
+} from "./types";
 
 // 列数はグリッドの幅から決める。iPad かどうかで決めると、iPhone Duo を開いた状態のような広い画面ですき間が空く
 const MIN_GRID_COLUMNS = 8;
@@ -55,6 +64,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ size: number; color: string
   flag: Flag,
   star: Star,
   "star-plus": StarPlus,
+  sparkles: Sparkles,
 };
 
 export type EmojiImageProps = {
@@ -96,6 +106,12 @@ export type EmojiPickerViewProps = {
   onSkinToneChange?: (tone: SkinTone) => void;
   /** 検索欄に肌の色の切り替えボタンを表示する。既定では肌の色のバリエーションを持つ絵文字がある場合のみ表示する */
   showSkinToneSelector?: boolean;
+  /** 意味の近い絵文字を探すなど、ピッカーの外で行う検索。カテゴリタブの先頭にタブとして追加する */
+  searchProvider?: EmojiSearchProvider;
+  /** 開いたときに検索プロバイダのタブを選び、検索欄にこの文字を入れておく (uncontrolled) */
+  defaultProviderQuery?: string;
+  /** 検索プロバイダのタブで探している文字 (前後の空白を除く) が変わったとき。ほかのタブに移ったときは空文字 */
+  onProviderQueryChange?: (query: string) => void;
 };
 
 function DefaultImage({ source, style }: EmojiImageProps) {
@@ -144,9 +160,66 @@ const EmojiItemCell = memo(
 );
 EmojiItemCell.displayName = "EmojiItemCell";
 
+type ProviderSearchState =
+  | { type: "idle" }
+  | { type: "loading" }
+  | { type: "failed" }
+  | { type: "ok"; result: EmojiSearchResult };
+
+// delayMs だけ入力が止まってから検索し、入力が変わったら前の検索を中断する。
+// attempt が変わったときは、同じ文字でも探し直す (失敗した後に同じ文字で確定し直したときなど)
+function useProviderSearch(
+  provider: EmojiSearchProvider | undefined,
+  text: string,
+  enabled: boolean,
+  delayMs: number,
+  attempt: number,
+): ProviderSearchState {
+  const query = text.trim();
+  const active = enabled && provider !== undefined && query !== "";
+  const cached = active ? provider?.peek?.(query) : undefined;
+  const isCached = cached !== undefined;
+  // provider も照らし合わせ、作り直されたときに前の provider の結果を出さない
+  const [settled, setSettled] = useState<{
+    provider: EmojiSearchProvider;
+    query: string;
+    attempt: number;
+    state: ProviderSearchState;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!active || !provider || isCached) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      provider
+        .search(query, { signal: controller.signal })
+        .then((result) => {
+          if (!controller.signal.aborted) setSettled({ provider, query, attempt, state: { type: "ok", result } });
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setSettled({ provider, query, attempt, state: { type: "failed" } });
+        });
+    }, delayMs);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [active, attempt, delayMs, isCached, provider, query]);
+
+  if (!active) return { type: "idle" };
+  if (cached) return { type: "ok", result: cached };
+  return settled?.provider === provider && settled.query === query && settled.attempt === attempt
+    ? settled.state
+    : { type: "loading" };
+}
+
 // 開いたときは、絵文字のある最初のカテゴリを選ぶ (先頭の「最近使用」などが空のことがある)
 function defaultCategoryId(categories: EmojiCategory[]) {
   return (categories.find((c) => c.emojis.length > 0) ?? categories[0])?.id ?? "";
+}
+
+function resolveIcon(icon: EmojiIcon) {
+  return typeof icon === "string" ? ICON_MAP[icon] : icon;
 }
 
 function CategoryButton({
@@ -161,7 +234,7 @@ function CategoryButton({
   onPress: () => void;
 }) {
   const theme = useColorScheme() ?? "light";
-  const IconComponent = typeof icon === "string" ? ICON_MAP[icon] : icon;
+  const IconComponent = resolveIcon(icon);
   const activeColor = theme === "dark" ? "#0A84FF" : "#007AFF";
   const inactiveColor = "#8E8E93";
 
@@ -186,10 +259,18 @@ export function EmojiPickerView({
   defaultSkinTone = 0,
   onSkinToneChange,
   showSkinToneSelector: showSkinToneSelectorProp,
+  searchProvider,
+  defaultProviderQuery,
+  onProviderQueryChange,
 }: EmojiPickerViewProps) {
   const theme = useColorScheme() ?? "light";
   const [selectedCategoryId, setSelectedCategoryId] = useState(() => defaultCategoryId(categories));
-  const [searchText, setSearchText] = useState("");
+  const restoresProviderQuery = searchProvider !== undefined && !!defaultProviderQuery;
+  const [isProviderSelected, setIsProviderSelected] = useState(restoresProviderQuery);
+  const [searchText, setSearchText] = useState(restoresProviderQuery ? defaultProviderQuery : "");
+  // searchOn: "submit" のとき、検索プロバイダで探す文字。確定するまで searchText とは別に持つ
+  const [submittedText, setSubmittedText] = useState(restoresProviderQuery ? defaultProviderQuery : "");
+  const [submitCount, setSubmitCount] = useState(0);
   const [innerSkinTone, setInnerSkinTone] = useState<SkinTone>(defaultSkinTone);
   const [isSkinTonePickerOpen, setIsSkinTonePickerOpen] = useState(false);
   const [variantTarget, setVariantTarget] = useState<EmojiItem | null>(null);
@@ -209,7 +290,63 @@ export function EmojiPickerView({
       setSelectedCategoryId(defaultCategoryId(categories));
     }
   }, [categories, selectedCategoryId]);
-  const isSearching = searchText.trim().length > 0;
+  const isProviderActive = isProviderSelected && searchProvider !== undefined;
+  // 検索プロバイダのタブでは、検索欄の文字はプロバイダの検索に使う
+  const isSearching = !isProviderActive && searchText.trim().length > 0;
+  const searchesOnSubmit = searchProvider?.searchOn === "submit";
+  const providerText = searchesOnSubmit ? submittedText : searchText;
+  const providerState = useProviderSearch(
+    searchProvider,
+    providerText,
+    // カテゴリを読み込んでいる間は探さない。カテゴリが届くと provider が作り直され、探し直しになるため
+    isProviderActive && !isLoading,
+    searchesOnSubmit ? 0 : (searchProvider?.debounceMs ?? 300),
+    submitCount,
+  );
+  const providerQuery = isProviderActive ? providerText.trim() : "";
+  useEffect(() => {
+    onProviderQueryChange?.(providerQuery);
+  }, [onProviderQueryChange, providerQuery]);
+
+  const handleSearchTextChange = useCallback((text: string) => {
+    setSearchText(text);
+    // 消したときは、確定を待たずに何も探していない状態に戻す
+    if (text.trim() === "") setSubmittedText("");
+  }, []);
+  const isProviderLoading = providerState.type === "loading";
+  const isSubmitted = searchText.trim() === submittedText.trim();
+  // 検索キーやボタンで確定したときは、同じ文字でも探し直す (失敗や制限の後に探し直せるように)。探している最中は除く
+  const submitSearchText = useCallback(() => {
+    if (isProviderLoading && isSubmitted) return;
+    setSubmittedText(searchText);
+    setSubmitCount((count) => count + 1);
+  }, [isProviderLoading, isSubmitted, searchText]);
+  // キーボードが閉じたときは、まだ確定していない文字があるときだけ確定する
+  const submitPendingText = useCallback(() => {
+    if (!isSubmitted) setSubmittedText(searchText);
+  }, [isSubmitted, searchText]);
+  const selectProvider = useCallback(() => {
+    setIsProviderSelected(true);
+    // タブを移ったときは、入力済みの文字をそのまま確定する。前に移ったときの結果を出さないよう、探し直す
+    setSubmittedText(searchText);
+    setSubmitCount((count) => count + 1);
+  }, [searchText]);
+  const selectCategory = (id: string) => {
+    if (isProviderActive) {
+      // 意味で探していた文字が残ると、カテゴリではなくその文字での通常の検索になってしまうので消す
+      setSearchText("");
+      setSubmittedText("");
+    }
+    setIsProviderSelected(false);
+    setSelectedCategoryId(id);
+  };
+
+  // Android の戻るボタンなどでは、フォーカスが残ったままキーボードだけ閉じるので、キーボードが閉じたことで確定する
+  useEffect(() => {
+    if (!isProviderActive || !searchesOnSubmit) return;
+    const subscription = Keyboard.addListener("keyboardDidHide", submitPendingText);
+    return () => subscription.remove();
+  }, [isProviderActive, searchesOnSubmit, submitPendingText]);
 
   const searchResults = useMemo(() => {
     if (!isSearching) return [];
@@ -276,7 +413,43 @@ export function EmojiPickerView({
   const keyExtractor = useCallback((item: EmojiItem, index: number) => `${item.id}-${index}`, []);
 
   const selectedCategory = categories.find((c) => c.id === selectedCategoryId) ?? categories[0];
-  const displayEmojis = isSearching ? searchResults : (selectedCategory?.emojis ?? []);
+  const providerResult = providerState.type === "ok" ? providerState.result : undefined;
+  const displayEmojis = isProviderActive
+    ? (providerResult?.items ?? [])
+    : isSearching
+      ? searchResults
+      : (selectedCategory?.emojis ?? []);
+  // 検索プロバイダのタブで、絵文字の代わりに表示する文言
+  const providerMessage = !isProviderActive
+    ? undefined
+    : providerState.type === "idle"
+      ? searchProvider?.idleMessage
+      : providerState.type === "failed"
+        ? searchProvider?.errorMessage
+        : providerResult && providerResult.items.length === 0
+          ? (providerResult.message ?? searchProvider?.emptyMessage)
+          : undefined;
+  const showProviderSuggestion =
+    isSearching && searchResults.length === 0 && searchProvider?.tryLabel !== undefined;
+  // searchOn: "submit" で、入力した文字をまだ確定していないときに出す、その文字で探すボタンの文言
+  const pendingText = searchText.trim();
+  const submitLabel =
+    isProviderActive && searchesOnSubmit && pendingText !== "" && pendingText !== submittedText.trim()
+      ? searchProvider?.submitLabel?.(pendingText)
+      : undefined;
+  const ProviderIcon = searchProvider ? resolveIcon(searchProvider.icon) : undefined;
+  const renderSuggestion = (label: string, onPress: () => void) => (
+    <View style={[styles.list, styles.suggestion]}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onPress}
+        style={[styles.suggestionButton, { borderColor: dividerColor }]}
+      >
+        {ProviderIcon && <ProviderIcon size={14} color={theme === "dark" ? "#FFFFFF" : "#000000"} />}
+        <Text style={{ fontSize: 14, color: theme === "dark" ? "#FFFFFF" : "#000000" }}>{label}</Text>
+      </Pressable>
+    </View>
+  );
 
   const bgColor = theme === "dark" ? "#1C1C1E" : "#FFFFFF";
   const panelColor = theme === "dark" ? "#2C2C2E" : "#F2F2F7";
@@ -296,15 +469,17 @@ export function EmojiPickerView({
           <Search size={16} color="#8E8E93" />
           <TextInput
             style={[styles.searchInput, { color: theme === "dark" ? "#FFFFFF" : "#000000" }]}
-            placeholder={searchPlaceholder}
+            placeholder={isProviderActive ? (searchProvider?.placeholder ?? searchPlaceholder) : searchPlaceholder}
             placeholderTextColor="#8E8E93"
             value={searchText}
-            onChangeText={setSearchText}
+            onChangeText={handleSearchTextChange}
+            onSubmitEditing={isProviderActive ? submitSearchText : undefined}
+            returnKeyType={isProviderActive && searchesOnSubmit ? "search" : undefined}
             autoCapitalize="none"
             autoCorrect={false}
           />
           {searchText.length > 0 && (
-            <Pressable onPress={() => setSearchText("")}>
+            <Pressable onPress={() => handleSearchTextChange("")}>
               <X size={16} color="#8E8E93" />
             </Pressable>
           )}
@@ -344,13 +519,21 @@ export function EmojiPickerView({
           style={styles.categoryBar}
           contentContainerStyle={styles.categoryBarContent}
         >
+          {searchProvider && (
+            <CategoryButton
+              icon={searchProvider.icon}
+              isSelected={isProviderActive}
+              disabled={false}
+              onPress={selectProvider}
+            />
+          )}
           {categories.map((category) => (
             <CategoryButton
               key={category.id}
               icon={category.icon}
-              isSelected={selectedCategoryId === category.id}
+              isSelected={!isProviderActive && selectedCategoryId === category.id}
               disabled={isSearching}
-              onPress={() => setSelectedCategoryId(category.id)}
+              onPress={() => selectCategory(category.id)}
             />
           ))}
         </ScrollView>
@@ -359,37 +542,57 @@ export function EmojiPickerView({
       </View>
 
       {/* ===== スクロール領域 ===== */}
-      {isLoading ? (
+      {isLoading || (submitLabel === undefined && isProviderActive && isProviderLoading) ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator />
         </View>
-      ) : !isSearching && displayEmojis.length === 0 && selectedCategory?.emptyMessage ? (
+      ) : submitLabel !== undefined ? (
+        renderSuggestion(submitLabel, submitSearchText)
+      ) : isProviderActive && displayEmojis.length === 0 ? (
+        <View style={styles.list}>
+          {providerMessage ? (
+            <Text
+              accessibilityRole={providerState.type === "failed" ? "alert" : undefined}
+              style={styles.message}
+            >
+              {providerMessage}
+            </Text>
+          ) : null}
+        </View>
+      ) : !isProviderActive && !isSearching && displayEmojis.length === 0 && selectedCategory?.emptyMessage ? (
         <View style={styles.list}>
           <Text style={styles.message}>{selectedCategory.emptyMessage}</Text>
         </View>
+      ) : showProviderSuggestion && searchProvider?.tryLabel !== undefined ? (
+        renderSuggestion(searchProvider.tryLabel, selectProvider)
       ) : (
-        <FlatListComponent
-          // FlatList は numColumns を実行中に変えられないので、列数が変わったら作り直す
-          key={gridColumns}
-          style={styles.list}
-          onLayout={(e: LayoutChangeEvent) => setGridWidth(e.nativeEvent.layout.width)}
-          data={displayEmojis}
-          renderItem={renderItem}
-          keyExtractor={keyExtractor}
-          numColumns={gridColumns}
-          contentContainerStyle={styles.gridContent}
-          columnWrapperStyle={styles.gridRow}
-          // numColumns > 1 のとき、index は絵文字ではなく行の番号になる
-          getItemLayout={(_: unknown, index: number) => ({
-            length: rowHeight,
-            offset: GRID_PADDING + rowHeight * index,
-            index,
-          })}
-          initialNumToRender={40}
-          maxToRenderPerBatch={40}
-          windowSize={5}
-          removeClippedSubviews
-        />
+        <>
+          {isProviderActive && providerResult?.message ? (
+            <Text style={styles.note}>{providerResult.message}</Text>
+          ) : null}
+          <FlatListComponent
+            // FlatList は numColumns を実行中に変えられないので、列数が変わったら作り直す
+            key={gridColumns}
+            style={styles.list}
+            onLayout={(e: LayoutChangeEvent) => setGridWidth(e.nativeEvent.layout.width)}
+            data={displayEmojis}
+            renderItem={renderItem}
+            keyExtractor={keyExtractor}
+            numColumns={gridColumns}
+            contentContainerStyle={styles.gridContent}
+            columnWrapperStyle={styles.gridRow}
+            // numColumns > 1 のとき、index は絵文字ではなく行の番号になる
+            getItemLayout={(_: unknown, index: number) => ({
+              length: rowHeight,
+              offset: GRID_PADDING + rowHeight * index,
+              index,
+            })}
+            initialNumToRender={40}
+            maxToRenderPerBatch={40}
+            windowSize={5}
+            removeClippedSubviews
+          />
+        </>
       )}
 
       {/* 長押しした絵文字の肌の色バリエーション */}
@@ -481,6 +684,25 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 14,
     color: "#8E8E93",
+  },
+  note: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    fontSize: 12,
+    color: "#8E8E93",
+  },
+  suggestion: {
+    alignItems: "center",
+    paddingVertical: 32,
+  },
+  suggestionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    height: 32,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   loadingContainer: {
     flex: 1,
