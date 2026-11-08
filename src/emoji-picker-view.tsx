@@ -144,6 +144,11 @@ const EmojiItemCell = memo(
 );
 EmojiItemCell.displayName = "EmojiItemCell";
 
+// 開いたときは、絵文字のある最初のカテゴリを選ぶ (先頭の「最近使用」などが空のことがある)
+function defaultCategoryId(categories: EmojiCategory[]) {
+  return (categories.find((c) => c.emojis.length > 0) ?? categories[0])?.id ?? "";
+}
+
 function CategoryButton({
   icon,
   isSelected,
@@ -183,7 +188,7 @@ export function EmojiPickerView({
   showSkinToneSelector: showSkinToneSelectorProp,
 }: EmojiPickerViewProps) {
   const theme = useColorScheme() ?? "light";
-  const [selectedCategoryId, setSelectedCategoryId] = useState(categories[0]?.id ?? "");
+  const [selectedCategoryId, setSelectedCategoryId] = useState(() => defaultCategoryId(categories));
   const [searchText, setSearchText] = useState("");
   const [innerSkinTone, setInnerSkinTone] = useState<SkinTone>(defaultSkinTone);
   const [isSkinTonePickerOpen, setIsSkinTonePickerOpen] = useState(false);
@@ -201,7 +206,7 @@ export function EmojiPickerView({
     const isValid = categories.some((c) => c.id === selectedCategoryId);
     if (!isValid) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSelectedCategoryId(categories[0].id);
+      setSelectedCategoryId(defaultCategoryId(categories));
     }
   }, [categories, selectedCategoryId]);
   const isSearching = searchText.trim().length > 0;
@@ -210,13 +215,13 @@ export function EmojiPickerView({
     if (!isSearching) return [];
     const query = searchText.toLowerCase().trim();
     const results: EmojiItem[] = [];
+    // 同じ絵文字を複数のカテゴリ (「最近使用」など) に入れていても、結果には 1 つだけ出す
+    const seen = new Set<string>();
     for (const category of categories) {
       for (const emoji of category.emojis) {
-        if (emoji.id.toLowerCase().includes(query)) {
-          results.push(emoji);
-          continue;
-        }
-        if (emoji.keywords.some((k) => k.toLowerCase().includes(query))) {
+        if (seen.has(emoji.id)) continue;
+        if (emoji.id.toLowerCase().includes(query) || emoji.keywords.some((k) => k.toLowerCase().includes(query))) {
+          seen.add(emoji.id);
           results.push(emoji);
         }
       }
@@ -358,6 +363,10 @@ export function EmojiPickerView({
         <View style={styles.loadingContainer}>
           <ActivityIndicator />
         </View>
+      ) : !isSearching && displayEmojis.length === 0 && selectedCategory?.emptyMessage ? (
+        <View style={styles.list}>
+          <Text style={styles.message}>{selectedCategory.emptyMessage}</Text>
+        </View>
       ) : (
         <FlatListComponent
           // FlatList は numColumns を実行中に変えられないので、列数が変わったら作り直す
@@ -465,6 +474,13 @@ const styles = StyleSheet.create({
   },
   gridContent: {
     padding: GRID_PADDING,
+  },
+  message: {
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+    textAlign: "center",
+    fontSize: 14,
+    color: "#8E8E93",
   },
   loadingContainer: {
     flex: 1,

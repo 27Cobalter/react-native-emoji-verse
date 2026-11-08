@@ -95,6 +95,8 @@ const custom: EmojiCategory = {
 <EmojiPickerView categories={[custom, ...categories]} onEmojiSelected={onSelect} />;
 ```
 
+Set `emptyMessage` on a category to show text in place of the grid when the category has no emoji, such as an empty recently used list. When the picker opens, it selects the first category that has emoji.
+
 The built-in icon names are `clock`, `smile`, `paw-print`, `utensils`, `trophy`, `plane`, `lightbulb`, `heart`, `flag`, `star` and `star-plus`.
 
 ## EmojiPickerView props

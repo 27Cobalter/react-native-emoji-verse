@@ -32,6 +32,8 @@ export type EmojiCategory = {
   /** 組み込みアイコン名 (lucide) またはアイコンコンポーネント */
   icon: EmojiIcon;
   emojis: EmojiItem[];
+  /** 絵文字が 1 つもないときに表示する文言 */
+  emptyMessage?: string;
 };
 
 export type EmojiCategoryType =
